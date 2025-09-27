@@ -1,0 +1,6 @@
+# app/config.py
+ALERT_THRESHOLD = 0.72
+MIN_ALERT_SECONDS = 8.0
+COOLDOWN_SECONDS = 120.0
+SR = 16000
+FRAME_SEC = 0.5  # stream chunk süresi
