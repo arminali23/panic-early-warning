@@ -45,29 +45,71 @@ def update_config(update: ConfigUpdate):
 async def calibrate(user_id: str = Form(...), wav: UploadFile = File(...)):
     data = await wav.read()
     y, sr = load_wav_mono16k(data)
-    feats = extract_clip_features(y, sr)
+    # kalite kontrol
+    m = calib_metrics(y, sr)
+    failed = []
+    if m["duration_sec"] < CONFIG.MIN_CALIB_SECONDS:
+        failed.append(f"duration<{CONFIG.MIN_CALIB_SECONDS}s")
+    if m["rms"] < CONFIG.MIN_RMS:
+        failed.append("too_quiet")
+    if m["clip_ratio"] > CONFIG.MAX_CLIP_RATIO:
+        failed.append("clipping")
+    if m["snr_db"] < CONFIG.MIN_SNR_DB:
+        failed.append("low_snr")
 
+    if failed:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": "calibration_failed",
+                "metrics": m,
+                "failed_checks": failed,
+                "hint": "Use /validate-calib to iterate until quality checks pass."
+            }
+        )
+
+    # kalite tamam: özellik çıkar → baseline
+    feats = extract_clip_features(y, sr)
     bl = get_or_create_baseline(user_id)
     for _ in range(30):
         bl.update(feats)
     mu, std = bl.stats()
     set_user_stats(user_id, mu, std)
-    return {"user_id": user_id, "message": "calibrated", "frames": bl.n}
 
-@app.post("/score", response_model=ScoreResponse)
-async def score(user_id: str = Form(...), wav: UploadFile = File(...)):
-    if user_id not in USER_STATS:
-        return JSONResponse(status_code=400, content={"error": "user not calibrated"})
-    pair = get_user_stats(user_id)
-    if not pair:
-        return JSONResponse(status_code=400, content={"error": "user not calibrated"})
-    mu, std = pair
+    return {
+        "user_id": user_id,
+        "message": "calibrated",
+        "frames": bl.n,
+        "metrics": m
+    }
+
+@app.post("/validate-calib", response_model=CalibValidationResponse)
+async def validate_calib(wav: UploadFile = File(...)):
     data = await wav.read()
     y, sr = load_wav_mono16k(data)
-    feats = extract_clip_features(y, sr)
-    z = zscore_vector(feats, mu, std)
-    risk = risk_from_z(z)
-    return ScoreResponse(user_id=user_id, risk=risk, details=z)
+    m = calib_metrics(y, sr)
+
+    failed = []
+    hints = []
+
+    if m["duration_sec"] < CONFIG.MIN_CALIB_SECONDS:
+        failed.append(f"duration<{CONFIG.MIN_CALIB_SECONDS}s")
+        hints.append("Record at least 60–120 seconds of calm, steady breathing/speaking.")
+
+    if m["rms"] < CONFIG.MIN_RMS:
+        failed.append("too_quiet")
+        hints.append("Move closer to the mic or increase input gain; avoid whispering.")
+
+    if m["clip_ratio"] > CONFIG.MAX_CLIP_RATIO:
+        failed.append("clipping")
+        hints.append("Reduce input gain; avoid shouting or saturating the microphone.")
+
+    if m["snr_db"] < CONFIG.MIN_SNR_DB:
+        failed.append("low_snr")
+        hints.append("Reduce background noise (fan/traffic), use a quieter room or headset mic.")
+
+    ok = len(failed) == 0
+    return CalibValidationResponse(ok=ok, metrics=m, failed_checks=failed, hints=hints)
 
 # ---- STREAM W/ ALERT POLICY ----
 @app.websocket("/stream")
