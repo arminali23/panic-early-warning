@@ -22,7 +22,7 @@ def healthz():
 def get_config():
     return CONFIG.model_dump()
 
-@app.put("/config", response_model=ConfigResponse)
+@app.put("/config", response_model=ConfigResponse, dependencies=[Depends(require_api_key)])
 def update_config(update: ConfigUpdate):
     data = update.model_dump(exclude_none=True)
     for k, v in data.items():
