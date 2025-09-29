@@ -40,14 +40,17 @@ async def calibrate(user_id: str = Form(...), wav: UploadFile = File(...)):
     for _ in range(30):
         bl.update(feats)
     mu, std = bl.stats()
-    USER_STATS[user_id] = (mu, std)
+    set_user_stats(user_id, mu, std)
     return {"user_id": user_id, "message": "calibrated", "frames": bl.n}
 
 @app.post("/score", response_model=ScoreResponse)
 async def score(user_id: str = Form(...), wav: UploadFile = File(...)):
     if user_id not in USER_STATS:
         return JSONResponse(status_code=400, content={"error": "user not calibrated"})
-    mu, std = USER_STATS[user_id]
+    pair = get_user_stats(user_id)
+    if not pair:
+        return JSONResponse(status_code=400, content={"error": "user not calibrated"})
+    mu, std = pair
     data = await wav.read()
     y, sr = load_wav_mono16k(data)
     feats = extract_clip_features(y, sr)
@@ -68,7 +71,10 @@ async def stream(websocket: WebSocket):
             await websocket.close()
             return
 
-        mu, std = USER_STATS[user_id]
+        pair = get_user_stats(user_id)
+        if not pair:
+            return JSONResponse(status_code=400, content={"error": "user not calibrated"})
+        mu, std = pair
         last_alert_time = 0.0
         above_since = None
 
