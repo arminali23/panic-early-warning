@@ -1,4 +1,5 @@
-# app/main.py (ilgili importları ekle)
+from fastapi import Depends
+from .deps import require_api_key
 from fastapi import FastAPI, UploadFile, File, Form, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 import asyncio, time, json, numpy as np
