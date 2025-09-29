@@ -7,7 +7,7 @@ import asyncio, time, json, numpy as np
 from .utils_audio import load_wav_mono16k
 from .features import extract_clip_features
 from .model import zscore_vector, risk_from_z
-from .state import get_or_create_baseline, USER_STATS
+from .state import get_or_create_baseline, set_user_stats, get_user_stats
 from .schemas import ScoreResponse, ConfigResponse, ConfigUpdate
 from .config import CONFIG  # değişti: sabitler yerine CONFIG
 
