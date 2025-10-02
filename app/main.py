@@ -111,6 +111,36 @@ async def validate_calib(wav: UploadFile = File(...)):
     ok = len(failed) == 0
     return CalibValidationResponse(ok=ok, metrics=m, failed_checks=failed, hints=hints)
 
+@app.post("/score", response_model=ScoreResponse)
+async def score(user_id: str = Form(...), wav: UploadFile = File(...)):
+    pair = get_user_stats(user_id)
+    if not pair:
+        return JSONResponse(status_code=400, content={"error": "user not calibrated"})
+    mu, std = pair
+
+    data = await wav.read()
+    y, sr = load_wav_mono16k(data)
+
+    # minimum süre kontrolü
+    dur = len(y) / float(sr)
+    if dur < CONFIG.MIN_SCORE_SECONDS:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "clip_too_short", "min_seconds": CONFIG.MIN_SCORE_SECONDS, "duration": dur}
+        )
+
+    # ön-işleme (özellik çıkarımı için)
+    x = apply_preprocess(
+        y, sr,
+        use_preemph=CONFIG.USE_PREEMPHASIS, pre_c=CONFIG.PREEMPHASIS_COEFF,
+        use_hpf=CONFIG.USE_HPF, hpf_cut=CONFIG.HPF_CUTOFF_HZ
+    )
+
+    feats = extract_clip_features(x, sr)
+    z = zscore_vector(feats, mu, std)
+    risk = risk_from_z(z)
+    return ScoreResponse(user_id=user_id, risk=risk, details=z)
+
 # ---- STREAM W/ ALERT POLICY ----
 @app.websocket("/stream")
 async def stream(websocket: WebSocket):
