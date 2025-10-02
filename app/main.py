@@ -140,9 +140,13 @@ async def score(user_id: str = Form(...), wav: UploadFile = File(...)):
     )
 
     feats = extract_clip_features(x, sr)
-    z = zscore_vector(feats, mu, std)
-    risk = risk_from_z(z)
-    return ScoreResponse(user_id=user_id, risk=risk, details=z)
+    m_risk = predict_proba(feats)
+    if m_risk is not None:
+        risk = float(m_risk)
+    else:
+        z = zscore_vector(feats, mu, std)
+        risk = risk_from_z(z)
+    return ScoreResponse(user_id=user_id, risk=risk, details=feats)
 
 # ---- STREAM W/ ALERT POLICY ----
 @app.websocket("/stream")
@@ -189,8 +193,12 @@ async def stream(websocket: WebSocket):
                 await websocket.send_text(json.dumps({"risk": risk, "alert": alert}))
             else:
                 await asyncio.sleep(0.001)
-    except WebSocketDisconnect:
-        pass
+        except WebSocketDisconnect:
+            pass
+        feats = extract_clip_features(x, sr=CONFIG.SR, frame_sec=CONFIG.FRAME_SEC)
+        m_risk = predict_proba(feats)
+        risk = float(m_risk) if m_risk is not None else float(risk_from_z(zscore_vector(feats, mu, std)))
+    
 @app.get("/model/info", response_model=ModelInfo)
 def model_get_info():
     return model_info()
