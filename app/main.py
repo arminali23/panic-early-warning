@@ -20,7 +20,10 @@ from .model import zscore_vector, risk_from_z
 from .state import get_or_create_baseline, set_user_stats, get_user_stats
 from .schemas import ScoreResponse, ConfigResponse, ConfigUpdate, CalibValidationResponse
 from .config import CONFIG
-from .deps import require_api_key  # varsa
+from .deps import require_api_key
+from .ml import load_model, unload_model, set_use_model, info as model_info, predict_proba
+from .schemas import ModelInfo
+from fastapi import Body
 
 app = FastAPI(title="Panic Early Warning API", version="0.2.0")
 
