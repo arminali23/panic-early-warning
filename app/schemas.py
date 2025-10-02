@@ -30,3 +30,9 @@ class ConfigUpdate(BaseModel):
     PREEMPHASIS_COEFF: float | None = Field(None, ge=0.0, le=1.0)
     USE_HPF: bool | None = None
     HPF_CUTOFF_HZ: float | None = Field(None, ge=0.0)
+
+class ModelInfo(BaseModel):
+    loaded: bool
+    use_model: bool
+    feature_count: int
+    classes: list[str]
