@@ -191,3 +191,18 @@ async def stream(websocket: WebSocket):
                 await asyncio.sleep(0.001)
     except WebSocketDisconnect:
         pass
+@app.get("/model/info", response_model=ModelInfo)
+def model_get_info():
+    return model_info()
+
+@app.post("/model/reload", response_model=ModelInfo)
+def model_reload(path: str = Body(..., embed=True)):
+    return load_model(path)
+
+@app.post("/model/unload", response_model=ModelInfo)
+def model_unload():
+    return unload_model()
+
+@app.post("/model/use", response_model=ModelInfo)
+def model_use(flag: bool = Body(..., embed=True)):
+    return set_use_model(flag)
