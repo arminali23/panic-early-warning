@@ -47,3 +47,39 @@ def calib_metrics(y: np.ndarray, sr: int):
     noise_est = float(np.percentile(abs_y, 20)) + 1e-12
     snr_db = 20.0 * float(np.log10(max(rms, 1e-12) / noise_est))
     return {"duration_sec": dur, "rms": rms, "clip_ratio": clip_ratio, "snr_db": snr_db}
+
+def spectral_gate(y: np.ndarray, sr: int, strength: float = 1.0):
+    """
+    Basit spektral gating: kısa süreli STFT, taban gürültü tahmini (medyan),
+    eşik üstü genlikleri koru, altını bastır.
+    """
+    if len(y) < sr // 2:
+        return y.astype("float32")
+    n_fft = 512
+    hop = 128
+    S = librosa.stft(y, n_fft=n_fft, hop_length=hop)
+    mag, phase = np.abs(S), np.angle(S)
+
+    # taban gürültü tahmini: frekans başına medyan
+    noise = np.median(mag, axis=1, keepdims=True)
+    thresh = noise * (1.5 * strength)  # eşik
+
+    mask = (mag >= thresh).astype(np.float32)
+    # yumuşatma
+    mask = librosa.decompose.nn_filter(mask, aggregate=np.median, metric="cosine", width=3)
+    mag_d = mag * mask
+
+    Sd = mag_d * np.exp(1j * phase)
+    yd = librosa.istft(Sd, hop_length=hop, length=len(y))
+    return yd.astype("float32")
+
+def apply_preprocess(y: np.ndarray, sr: int, use_preemph: bool, pre_c: float, use_hpf: bool, hpf_cut: float,
+                     use_denoise: bool = False, denoise_strength: float = 1.0):
+    x = y.astype("float32")
+    if use_hpf:
+        x = highpass(x, sr, cutoff_hz=hpf_cut)
+    if use_denoise:
+        x = spectral_gate(x, sr, strength=denoise_strength)
+    if use_preemph:
+        x = pre_emphasis(x, coeff=pre_c)
+    return x
