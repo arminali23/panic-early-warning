@@ -65,3 +65,28 @@ def predict_proba(feats: dict) -> Optional[float]:
         weight = 1.0 if "high" in name else (0.5 if "med" in name or "moderate" in name else 0.0)
         score += weight * float(p)
     return max(0.0, min(1.0, score))
+    
+def predict_details(feats: dict) -> Optional[dict]:
+    """
+    If model is loaded/active: return {"risk": float, "probs": [..], "classes":[..]}
+    else: None
+    """
+    if _LOADED is None or not _USE_MODEL:
+        return None
+    x = vectorize_feats(feats, _LOADED.feature_names)
+    xs = _LOADED.scaler.transform(x)
+    probs = _LOADED.clf.predict_proba(xs)[0].tolist()
+    classes = [_LOADED.label_map.get(i, str(i)) for i in range(len(probs))]
+
+    # Binary: prob of positive class
+    if len(probs) == 2:
+        risk = float(probs[1])
+    else:
+        # multi-class weighted (low=0, med=0.5, high=1)
+        risk = 0.0
+        for i, p in enumerate(probs):
+            name = classes[i].lower()
+            w = 1.0 if "high" in name else (0.5 if ("med" in name or "moderate" in name) else 0.0)
+            risk += w * float(p)
+        risk = max(0.0, min(1.0, risk))
+    return {"risk": risk, "probs": probs, "classes": classes}
