@@ -4,6 +4,8 @@ class ScoreResponse(BaseModel):
     user_id: str
     risk: float
     details: dict
+    source: str  # "model" or "rule"
+    probs: list[float] | None = None  # if model is loaded
 
 class ConfigResponse(BaseModel):
     ALERT_THRESHOLD: float
