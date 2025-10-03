@@ -25,6 +25,10 @@ from .ml import load_model, unload_model, set_use_model, info as model_info, pre
 from .schemas import ModelInfo
 from fastapi import Body
 
+from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+from fastapi import Request
+from .metrics import REQUESTS, LATENCY, SCORE_SOURCE, STREAM_ALERTS
+
 app = FastAPI(title="Panic Early Warning API", version="0.2.0")
 
 @app.get("/healthz")
@@ -214,3 +218,19 @@ def model_unload():
 @app.post("/model/use", response_model=ModelInfo)
 def model_use(flag: bool = Body(..., embed=True)):
     return set_use_model(flag)
+
+
+@app.get("/metrics")
+def metrics():
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+@app.middleware("http")
+async def metrics_middleware(request: Request, call_next):
+    import time as _time
+    start = _time.time()
+    response = await call_next(request)
+    elapsed = _time.time() - start
+    endpoint = request.url.path
+    LATENCY.labels(endpoint=endpoint, method=request.method).observe(elapsed)
+    REQUESTS.labels(endpoint=endpoint, method=request.method, code=str(response.status_code)).inc()
+    return response
