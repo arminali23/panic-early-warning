@@ -18,3 +18,4 @@ scikit-learn==1.5.1
 joblib==1.4.2
 pandas==2.2.2
 prometheus-client==0.21.0
+slowapi==0.1.9
