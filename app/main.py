@@ -6,6 +6,12 @@ from fastapi.responses import JSONResponse
 import asyncio, time, json
 import numpy as np
 from .deps import require_api_key
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from fastapi.responses import PlainTextResponse
+
+from .logging_utils import log_event, dump_logs, new_req_id
 from .utils_audio import (
     load_wav_mono16k, calib_metrics, apply_preprocess
 )
