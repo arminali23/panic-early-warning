@@ -1,4 +1,3 @@
-# app/main.py
 from fastapi import (
     FastAPI, UploadFile, File, Form, WebSocket, WebSocketDisconnect,
     Depends, Body, Request, Response
@@ -6,53 +5,31 @@ from fastapi import (
 from fastapi.responses import JSONResponse, PlainTextResponse
 import asyncio, time, json
 import numpy as np
-
-# --- Auth / deps ---
 from .deps import require_api_key
-
-# --- Audio utils & preprocessing ---
 from .utils_audio import (
     load_wav_mono16k, calib_metrics, apply_preprocess
 )
-
-# --- Feature extraction & rule-based scoring ---
 from .features import extract_clip_features
 from .model import zscore_vector, risk_from_z
-
-# --- State (in-memory/Redis) ---
 from .state import get_or_create_baseline, set_user_stats, get_user_stats
-
-# --- Schemas ---
 from .schemas import (
     ScoreResponse, ConfigResponse, ConfigUpdate, CalibValidationResponse, ModelInfo
 )
-
-# --- Runtime config ---
 from .config import CONFIG
-
-# --- Light ML model management ---
 from .ml import (
     load_model, unload_model, set_use_model,
     info as model_info, predict_details
 )
-
-# --- Prometheus metrics ---
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from .metrics import REQUESTS, LATENCY, SCORE_SOURCE, STREAM_ALERTS
-
-# --- Rate limiting (SlowAPI) ---
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
-
-# --- JSON logs (/logs) ---
 from .logging_utils import log_event, dump_logs, new_req_id
 
 
 app = FastAPI(title="Panic Early Warning API", version="0.4.0")
-
-# Rate limiting setup
 limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 app.add_middleware(SlowAPIMiddleware)
@@ -61,18 +38,10 @@ app.add_middleware(SlowAPIMiddleware)
 def rate_limit_handler(request, exc):
     return PlainTextResponse("Too Many Requests", status_code=429)
 
-
-# -------------------------
-# Health
-# -------------------------
 @app.get("/healthz")
 def healthz():
     return {"ok": True, "service": "panic-early-warning", "version": "0.4.0"}
 
-
-# -------------------------
-# Config (GET/PUT)
-# -------------------------
 @app.get("/config", response_model=ConfigResponse)
 @limiter.limit("60/minute")
 def get_config():
@@ -88,9 +57,6 @@ def update_config(update: ConfigUpdate):
     return CONFIG.model_dump()
 
 
-# -------------------------
-# Calibration quality check (no state change)
-# -------------------------
 @app.post("/validate-calib", response_model=CalibValidationResponse)
 @limiter.limit("20/hour")
 async def validate_calib(wav: UploadFile = File(...)):
@@ -120,16 +86,12 @@ async def validate_calib(wav: UploadFile = File(...)):
     return CalibValidationResponse(ok=ok, metrics=m, failed_checks=failed, hints=hints)
 
 
-# -------------------------
-# Calibrate (writes baseline)
-# -------------------------
 @app.post("/calibrate")
 @limiter.limit("6/hour")
 async def calibrate(user_id: str = Form(...), wav: UploadFile = File(...)):
     data = await wav.read()
     y, sr = load_wav_mono16k(data)
 
-    # Quality checks on raw signal
     m = calib_metrics(y, sr)
     failed = []
     if m["duration_sec"] < CONFIG.MIN_CALIB_SECONDS:
@@ -152,7 +114,6 @@ async def calibrate(user_id: str = Form(...), wav: UploadFile = File(...)):
             }
         )
 
-    # Preprocess for feature extraction (keep raw for quality metrics)
     x = apply_preprocess(
         y, sr,
         use_preemph=CONFIG.USE_PREEMPHASIS, pre_c=CONFIG.PREEMPHASIS_COEFF,
@@ -162,7 +123,6 @@ async def calibrate(user_id: str = Form(...), wav: UploadFile = File(...)):
 
     feats = extract_clip_features(x, sr)
     bl = get_or_create_baseline(user_id)
-    # Update baseline stats repeatedly for stability
     for _ in range(30):
         bl.update(feats)
     mu, std = bl.stats()
@@ -176,9 +136,6 @@ async def calibrate(user_id: str = Form(...), wav: UploadFile = File(...)):
     }
 
 
-# -------------------------
-# Score (file-based)
-# -------------------------
 @app.post("/score", response_model=ScoreResponse)
 @limiter.limit("30/minute")
 async def score(user_id: str = Form(...), wav: UploadFile = File(...)):
@@ -190,7 +147,6 @@ async def score(user_id: str = Form(...), wav: UploadFile = File(...)):
     data = await wav.read()
     y, sr = load_wav_mono16k(data)
 
-    # Minimum clip duration
     dur = len(y) / float(sr)
     if dur < CONFIG.MIN_SCORE_SECONDS:
         return JSONResponse(
@@ -198,7 +154,6 @@ async def score(user_id: str = Form(...), wav: UploadFile = File(...)):
             content={"error": "clip_too_short", "min_seconds": CONFIG.MIN_SCORE_SECONDS, "duration": dur}
         )
 
-    # Preprocess for features
     x = apply_preprocess(
         y, sr,
         use_preemph=CONFIG.USE_PREEMPHASIS, pre_c=CONFIG.PREEMPHASIS_COEFF,
@@ -207,7 +162,6 @@ async def score(user_id: str = Form(...), wav: UploadFile = File(...)):
     )
     feats = extract_clip_features(x, sr)
 
-    # Try ML model → fallback to rule
     md = predict_details(feats)
     if md is not None:
         SCORE_SOURCE.labels(source="model").inc()
@@ -231,9 +185,6 @@ async def score(user_id: str = Form(...), wav: UploadFile = File(...)):
         )
 
 
-# -------------------------
-# Stream (WebSocket) with alert policy
-# -------------------------
 @app.websocket("/stream")
 async def stream(websocket: WebSocket):
     await websocket.accept()
@@ -255,10 +206,8 @@ async def stream(websocket: WebSocket):
         while True:
             msg = await websocket.receive()
             if "bytes" in msg and msg["bytes"] is not None:
-                # Incoming chunk: float32 PCM @ CONFIG.SR, ~FRAME_SEC seconds
                 x = np.frombuffer(msg["bytes"], dtype=np.float32)
 
-                # Preprocess and extract features
                 x = apply_preprocess(
                     x, CONFIG.SR,
                     use_preemph=CONFIG.USE_PREEMPHASIS, pre_c=CONFIG.PREEMPHASIS_COEFF,
@@ -267,7 +216,6 @@ async def stream(websocket: WebSocket):
                 )
                 feats = extract_clip_features(x, sr=CONFIG.SR, frame_sec=CONFIG.FRAME_SEC)
 
-                # Model → Rule fallback
                 md = predict_details(feats)
                 if md is not None:
                     risk = float(md["risk"])
@@ -276,7 +224,6 @@ async def stream(websocket: WebSocket):
                     risk = float(risk_from_z(zscore_vector(feats, mu, std)))
                     src = "rule"
 
-                # Alert policy (hysteresis + cooldown)
                 now = time.time()
                 in_cooldown = (now - last_alert_time) < CONFIG.COOLDOWN_SECONDS
                 alert = False
@@ -296,13 +243,9 @@ async def stream(websocket: WebSocket):
             else:
                 await asyncio.sleep(0.001)
     except WebSocketDisconnect:
-        # client disconnected
         pass
 
 
-# -------------------------
-# Model management endpoints
-# -------------------------
 @app.get("/model/info", response_model=ModelInfo)
 @limiter.limit("120/minute")
 def model_get_info():
@@ -327,9 +270,6 @@ def model_use(flag: bool = Body(..., embed=True)):
     return set_use_model(flag)
 
 
-# -------------------------
-# Logs (recent JSON events)
-# -------------------------
 @app.get("/logs")
 @limiter.limit("120/minute")
 def get_logs(limit: int = 100):
@@ -340,17 +280,11 @@ def get_logs(limit: int = 100):
     return dump_logs(limit=limit)
 
 
-# -------------------------
-# Prometheus metrics endpoint
-# -------------------------
 @app.get("/metrics")
 def metrics():
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
-# -------------------------
-# Access log middleware (JSON) + X-Request-ID
-# -------------------------
 @app.middleware("http")
 async def access_log_middleware(request: Request, call_next):
     rid = new_req_id()
@@ -387,9 +321,6 @@ async def access_log_middleware(request: Request, call_next):
         raise
 
 
-# -------------------------
-# Prometheus latency/requests middleware
-# -------------------------
 @app.middleware("http")
 async def metrics_middleware(request: Request, call_next):
     import time as _time
