@@ -27,6 +27,9 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from .logging_utils import log_event, dump_logs, new_req_id
+from fastapi.middleware.cors import CORSMiddleware
+import os
+from .state import redis_ready
 
 
 app = FastAPI(title="Panic Early Warning API", version="0.4.0")
