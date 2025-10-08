@@ -45,3 +45,13 @@ def get_user_stats(user_id: str) -> Tuple[dict, dict] | None:
         return (mu, std)
     else:
         return USER_STATS.get(user_id)
+
+def redis_ready() -> bool:
+    global _redis
+    if _redis is None:
+        return False
+    try:
+        _redis.ping()
+        return True
+    except Exception:
+        return False
